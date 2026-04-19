@@ -537,19 +537,19 @@ popd
 	readme_directory=%{postfix_readme_dir} &> /dev/null
 
 ALTERNATIVES_DOCS=""
-[ "%%{_excludedocs}" = 1 ] || ALTERNATIVES_DOCS='--follower %{_mandir}/man1/mailq.1.gz mta-mailqman %{_mandir}/man1/mailq.postfix.1.gz
-	--follower %{_mandir}/man1/newaliases.1.gz mta-newaliasesman %{_mandir}/man1/newaliases.postfix.1.gz
-	--follower %{_mandir}/man8/sendmail.8.gz mta-sendmailman %{_mandir}/man1/sendmail.postfix.1.gz
-	--follower %{_mandir}/man5/aliases.5.gz mta-aliasesman %{_mandir}/man5/aliases.postfix.5.gz
-	--follower %{_mandir}/man8/smtp.8.gz mta-smtpman %{_mandir}/man8/smtp.postfix.8.gz
-	--follower %{_mandir}/man8/smtpd.8.gz mta-smtpdman %{_mandir}/man8/smtpd.postfix.8.gz'
+[ "%%{_excludedocs}" = 1 ] || ALTERNATIVES_DOCS='--slave %{_mandir}/man1/mailq.1.gz mta-mailqman %{_mandir}/man1/mailq.postfix.1.gz
+	--slave %{_mandir}/man1/newaliases.1.gz mta-newaliasesman %{_mandir}/man1/newaliases.postfix.1.gz
+	--slave %{_mandir}/man8/sendmail.8.gz mta-sendmailman %{_mandir}/man1/sendmail.postfix.1.gz
+	--slave %{_mandir}/man5/aliases.5.gz mta-aliasesman %{_mandir}/man5/aliases.postfix.5.gz
+	--slave %{_mandir}/man8/smtp.8.gz mta-smtpman %{_mandir}/man8/smtp.postfix.8.gz
+	--slave %{_mandir}/man8/smtpd.8.gz mta-smtpdman %{_mandir}/man8/smtpd.postfix.8.gz'
 
 alternatives --install %{postfix_command_dir}/sendmail mta %{postfix_command_dir}/sendmail.postfix 60 \
-	--follower %{_bindir}/mailq mta-mailq %{_bindir}/mailq.postfix \
-	--follower %{_bindir}/newaliases mta-newaliases %{_bindir}/newaliases.postfix \
-	--follower %{_sysconfdir}/pam.d/smtp mta-pam %{_sysconfdir}/pam.d/smtp.postfix \
-	--follower %{_bindir}/rmail mta-rmail %{_bindir}/rmail.postfix \
-	--follower %{_prefix}/lib/sendmail mta-sendmail %{_prefix}/lib/sendmail.postfix \
+	--slave %{_bindir}/mailq mta-mailq %{_bindir}/mailq.postfix \
+	--slave %{_bindir}/newaliases mta-newaliases %{_bindir}/newaliases.postfix \
+	--slave %{_sysconfdir}/pam.d/smtp mta-pam %{_sysconfdir}/pam.d/smtp.postfix \
+	--slave %{_bindir}/rmail mta-rmail %{_bindir}/rmail.postfix \
+	--slave %{_prefix}/lib/sendmail mta-sendmail %{_prefix}/lib/sendmail.postfix \
 	$ALTERNATIVES_DOCS \
 	--initscript postfix
 
