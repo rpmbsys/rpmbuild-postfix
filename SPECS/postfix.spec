@@ -1,16 +1,30 @@
 # plugins have unresolvable symbols in compile time
 %undefine _strict_symbol_defs_build
+%global debug_package %{nil}
+%define _debugsource_template %{nil}
 
+%if 0%{?rhel} < 10
+%bcond_without db
+%else
+%bcond_with db
+%endif
 %bcond_without mysql
 %bcond_without pgsql
 %bcond_without sqlite
 %bcond_without cdb
 %bcond_without ldap
+%bcond_without lmdb
 %bcond_without pcre
 %bcond_without sasl
 %bcond_without tls
 %bcond_without ipv6
 %bcond_without pflogsumm
+
+%if %{without db} && %{with lmdb}
+%global defmap_lmdb 1
+%else
+%global defmap_lmdb 0
+%endif
 
 %global sysv2systemdnvr 2.8.12-2
 
@@ -20,12 +34,9 @@
 # Postfix requires one exlusive uid/gid and a 2nd exclusive gid for its own
 # use.  Let me know if the second gid collides with another package.
 # Be careful: Redhat's 'mail' user & group isn't unique!
-%define postfix_uid	89
+# It's now handled by systemd-sysusers.
 %define postfix_user	postfix
-%define postfix_gid	89
-%define postfix_group	postfix
 %define maildrop_group	postdrop
-%define maildrop_gid	90
 
 %define postfix_config_dir	%{_sysconfdir}/postfix
 %define postfix_daemon_dir	%{_libexecdir}/postfix
@@ -47,33 +58,35 @@
 
 Name: postfix
 Summary: Postfix Mail Transport Agent
-Version: 3.3.1
-Release: 8%{?dist}
+Version: 3.11.1
+Release: 2%{?dist}
 Epoch: 2
-Group: System Environment/Daemons
 URL: http://www.postfix.org
-License: (IBM and GPLv2+) or (EPL-2.0 and GPLv2+)
-Requires(post): systemd
+License: (IPL-1.0 OR EPL-2.0) AND GPL-2.0-or-later AND BSD-4-Clause-UC
+Requires(post): systemd systemd-sysv hostname
 Requires(post): %{_sbindir}/alternatives
 Requires(post): %{_bindir}/openssl
-Requires(pre): %{_sbindir}/groupadd
-Requires(pre): %{_sbindir}/useradd
 Requires(preun): %{_sbindir}/alternatives
 Requires(preun): systemd
 Requires(postun): systemd
 # Required by /usr/libexec/postfix/postfix-script
 Requires: diffutils
+Requires: findutils
+# for restorecon
+Requires: policycoreutils
 Provides: MTA smtpd smtpdaemon server(smtp)
 
-Source0: ftp://ftp.porcupine.org/mirrors/postfix-release/official/%{name}-%{version}.tar.gz
+Source0: http://ftp.porcupine.org/mirrors/postfix-release/official/%{name}-%{version}.tar.gz
+Source1: postfix-etc-init.d-postfix
 Source2: postfix.service
 Source3: README-Postfix-SASL-RedHat.txt
 Source4: postfix.aliasesdb
 Source5: postfix-chroot-update
+Source6: postfix.sysusers
 
 # Sources 50-99 are upstream [patch] contributions
 
-%define pflogsumm_ver 1.1.5
+%define pflogsumm_ver 1.1.6
 
 # Postfix Log Entry Summarizer: http://jimsun.linxnet.com/postfix_contrib.html
 Source53: http://jimsun.linxnet.com/downloads/pflogsumm-%{pflogsumm_ver}.tar.gz
@@ -85,39 +98,78 @@ Source101: postfix-pam.conf
 
 # Patches
 
-Patch1: postfix-3.2.0-config.patch
-Patch2: postfix-3.1.0-files.patch
-Patch3: postfix-3.1.0-alternatives.patch
-Patch4: postfix-3.2.0-large-fs.patch
-Patch5: postfix-3.3.1-posttls-finger-unix-fix.patch
-Patch9: pflogsumm-1.1.5-datecalc.patch
-# rhbz#1384871, sent upstream
-Patch10: pflogsumm-1.1.5-ipv6-warnings-fix.patch
+Patch1: postfix-3.11.1-config.patch
+Patch2: postfix-3.11.0-files.patch
+Patch3: postfix-3.9.0-alternatives.patch
+# probably rhbz#428996
+Patch4: postfix-3.8.0-large-fs.patch
+# rhbz#1931403, sent upstream
+Patch9: pflogsumm-1.1.6-syslog-name-underscore-fix.patch
+Patch11: postfix-3.4.4-chroot-example-fix.patch
+%if 0%{?rhel}
+Patch12: postfix-3.10.7-rhel-remove-version-mismatch-warning.patch
+%endif
 
 # Optional patches - set the appropriate environment variables to include
 #                    them when building the package/spec file
 
 
 # Determine the different packages required for building postfix
-BuildRequires: libdb-devel, perl-generators, pkgconfig, zlib-devel
-BuildRequires: systemd-units, libicu-devel, libnsl2-devel
-BuildRequires: gcc, m4
+BuildRequires: make
+BuildRequires: perl-generators
+BuildRequires: pkgconfig
+BuildRequires: zlib-devel
+BuildRequires: systemd-units
+BuildRequires: libicu-devel
+BuildRequires: gcc
+BuildRequires: m4
+BuildRequires: findutils
+BuildRequires: systemd-rpm-macros
+BuildRequires: sed
+%if 0%{?rhel} < 9
+BuildRequires: libnsl2-devel
+%endif
 
+%{?with_db:BuildRequires: libdb-devel}
 %{?with_ldap:BuildRequires: openldap-devel}
+%{?with_lmdb:BuildRequires: lmdb-devel}
 %{?with_sasl:BuildRequires: cyrus-sasl-devel}
-%{?with_pcre:BuildRequires: pcre-devel}
+%{?with_pcre:BuildRequires: pcre2-devel}
 %{?with_mysql:BuildRequires: mariadb-connector-c-devel}
-%{?with_pgsql:BuildRequires: postgresql-devel}
+%{?with_pgsql:BuildRequires: libpq-devel}
 %{?with_sqlite:BuildRequires: sqlite-devel}
 %{?with_cdb:BuildRequires: tinycdb-devel}
 %{?with_tls:BuildRequires: openssl-devel}
 
+%if 0%{?defmap_lmdb}
+Requires: %{name}-lmdb%{?_isa} = %{epoch}:%{version}-%{release}
+%endif
+
+%if "%{_sbindir}" == "%{_bindir}"
+# Compat symlinks for Requires in other packages.
+# We rely on filesystem to create the symlinks for us.
+Requires: filesystem(unmerged-sbin-symlinks)
+Provides: /usr/sbin/sendmail
+Provides: /usr/sbin/smtp-sink
+%endif
+
 %description
 Postfix is a Mail Transport Agent (MTA).
 
+%if 0%{?fedora} < 23 && 0%{?rhel} < 9
+%package sysvinit
+Summary: SysV initscript for postfix
+BuildArch: noarch
+Requires: %{name} = %{epoch}:%{version}-%{release}
+Requires(preun): chkconfig
+Requires(post): chkconfig
+
+%description sysvinit
+This package contains the SysV initscript.
+%endif
+
 %package perl-scripts
 Summary: Postfix utilities written in perl
-Group: Applications/System
 Requires: %{name} = %{epoch}:%{version}-%{release}
 # perl-scripts introduced in 2:2.5.5-2
 Obsoletes: postfix < 2:2.5.5-2
@@ -186,6 +238,16 @@ This provides support for LDAP maps in Postfix. If you plan to use LDAP
 maps with Postfix, you need this.
 %endif
 
+%if %{with lmdb}
+%package lmdb
+Summary: Postfix LDMB map support
+Requires: %{name} = %{epoch}:%{version}-%{release}
+
+%description lmdb
+This provides support for LMDB maps in Postfix. If you plan to use LMDB
+maps with Postfix, you need this.
+%endif
+
 %if %{with pcre}
 %package pcre
 Summary: Postfix PCRE map support
@@ -199,11 +261,10 @@ maps with Postfix, you need this.
 %prep
 %setup -q
 # Apply obligatory patches
-%patch1 -p1 -b .config
-%patch2 -p1 -b .files
-%patch3 -p1 -b .alternatives
-%patch4 -p1 -b .large-fs
-%patch5 -p1 -b .posttls-finger-unix-fix
+%patch -P1 -p1 -b .config
+%patch -P2 -p1 -b .files
+%patch -P3 -p1 -b .alternatives
+%patch -P4 -p1 -b .large-fs
 
 # Change DEF_SHLIB_DIR according to build host
 sed -i \
@@ -213,20 +274,45 @@ src/global/mail_params.h
 %if %{with pflogsumm}
 gzip -dc %{SOURCE53} | tar xf -
 pushd pflogsumm-%{pflogsumm_ver}
-%patch9 -p1 -b .datecalc
-%patch10 -p1 -b .ipv6-warnings-fix
+%patch -P9 -p1 -b .pflogsumm-1.1.6-syslog-name-underscore-fix
 popd
 %endif
+%patch -P11 -p1 -b .chroot-example-fix
+
+%if 0%{?rhel}
+%patch -P12 -p1 -b .warning
+%endif
+
+# Backport 3.8-20221006 fix for uname -r detection
+sed -i makedefs -e '\@Linux\.@s|345|3456|'
+sed -i src/util/sys_defs.h -e 's@defined(LINUX5)@defined(LINUX5) || defined(LINUX6)@'
 
 for f in README_FILES/TLS_{LEGACY_,}README TLS_ACKNOWLEDGEMENTS; do
 	iconv -f iso8859-1 -t utf8 -o ${f}{_,} &&
 		touch -r ${f}{,_} && mv -f ${f}{_,}
 done
 
+# fix default maps
+%if 0%{?defmap_lmdb}
+  sed -i '/^\s*alias_maps\s*=\s*hash:\/etc\/aliases/ s|hash:|lmdb:|g' conf/main.cf
+  sed -i '/^\s*alias_database\s*=\s*hash:\/etc\/aliases/ s|hash:|lmdb:|g' conf/main.cf
+  echo >> conf/main.cf
+  echo "default_database_type = lmdb" >> conf/main.cf
+%endif
+
 %build
-unset AUXLIBS AUXLIBS_LDAP AUXLIBS_PCRE AUXLIBS_MYSQL AUXLIBS_PGSQL AUXLIBS_SQLITE AUXLIBS_CDB
-CCARGS="-fPIC"
+%set_build_flags
+unset AUXLIBS AUXLIBS_LDAP AUXLIBS_LMDB AUXLIBS_PCRE AUXLIBS_MYSQL AUXLIBS_PGSQL AUXLIBS_SQLITE AUXLIBS_CDB
+CCARGS="-fPIC -fcommon -std=gnu17"
+%if 0%{?rhel} >= 9
+AUXLIBS=""
+%else
 AUXLIBS="-lnsl"
+%endif
+
+%if %{without db}
+  CCARGS="${CCARGS} -DNO_DB"
+%endif
 
 %ifarch s390 s390x ppc
 CCARGS="${CCARGS} -fsigned-char"
@@ -236,10 +322,13 @@ CCARGS="${CCARGS} -fsigned-char"
   CCARGS="${CCARGS} -DHAS_LDAP -DLDAP_DEPRECATED=1 %{?with_sasl:-DUSE_LDAP_SASL}"
   AUXLIBS_LDAP="-lldap -llber"
 %endif
+%if %{with lmdb}
+  CCARGS="${CCARGS} -DHAS_LMDB"
+  AUXLIBS_LMDB="-llmdb"
+%endif
 %if %{with pcre}
-  # -I option required for pcre 3.4 (and later?)
-  CCARGS="${CCARGS} -DHAS_PCRE -I%{_includedir}/pcre"
-  AUXLIBS_PCRE="-lpcre"
+  CCARGS="${CCARGS} -DHAS_PCRE=2 `pcre2-config --cflags`"
+  AUXLIBS_PCRE=`pcre2-config --libs8`
 %endif
 %if %{with mysql}
   CCARGS="${CCARGS} -DHAS_MYSQL -I%{_includedir}/mysql"
@@ -277,8 +366,10 @@ CCARGS="${CCARGS} -fsigned-char"
 
 CCARGS="${CCARGS} -DDEF_CONFIG_DIR=\\\"%{postfix_config_dir}\\\""
 CCARGS="${CCARGS} $(getconf LFS_CFLAGS)"
-
-LDFLAGS="%{?__global_ldflags} %{?_hardened_build:-Wl,-z,relro,-z,now}"
+%if 0%{?rhel} >= 9
+    CCARGS="${CCARGS} -DNO_NIS"
+%endif
+LDFLAGS="$LDFLAGS %{?_hardened_build:-Wl,-z,relro,-z,now}"
 
 # SHLIB_RPATH is needed to find private libraries
 # LDFLAGS are added to SHLIB_RPATH because the postfix build system
@@ -286,23 +377,21 @@ LDFLAGS="%{?__global_ldflags} %{?_hardened_build:-Wl,-z,relro,-z,now}"
 # way how to get them in
 make -f Makefile.init makefiles shared=yes dynamicmaps=yes \
   %{?_hardened_build:pie=yes} CCARGS="${CCARGS}" AUXLIBS="${AUXLIBS}" \
-  AUXLIBS_LDAP="${AUXLIBS_LDAP}" AUXLIBS_PCRE="${AUXLIBS_PCRE}" \
-  AUXLIBS_MYSQL="${AUXLIBS_MYSQL}" AUXLIBS_PGSQL="${AUXLIBS_PGSQL}" \
-  AUXLIBS_SQLITE="${AUXLIBS_SQLITE}" AUXLIBS_CDB="${AUXLIBS_CDB}"\
+  AUXLIBS_LDAP="${AUXLIBS_LDAP}" AUXLIBS_LMDB="${AUXLIBS_LMDB}" \
+  AUXLIBS_PCRE="${AUXLIBS_PCRE}" AUXLIBS_MYSQL="${AUXLIBS_MYSQL}" \
+  AUXLIBS_PGSQL="${AUXLIBS_PGSQL}" AUXLIBS_SQLITE="${AUXLIBS_SQLITE}" \
+  AUXLIBS_CDB="${AUXLIBS_CDB}" \
   DEBUG="" SHLIB_RPATH="-Wl,-rpath,%{postfix_shlib_dir} $LDFLAGS" \
-  OPT="$RPM_OPT_FLAGS -fno-strict-aliasing -Wno-comment" \
+  OPT="$CFLAGS -fno-strict-aliasing -Wno-comment" \
   POSTFIX_INSTALL_OPTS=-keep-build-mtime
 
-make %{?_smp_mflags}
+%make_build
 
 %install
-rm -rf $RPM_BUILD_ROOT
-mkdir -p $RPM_BUILD_ROOT
-
 # install postfix into $RPM_BUILD_ROOT
 
 # Move stuff around so we don't conflict with sendmail
-for i in man1/mailq.1 man1/newaliases.1 man1/sendmail.1 man5/aliases.5 man8/smtpd.8; do
+for i in man1/mailq.1 man1/newaliases.1 man1/sendmail.1 man5/aliases.5 man8/smtp{,d}.8; do
   dest=$(echo $i | sed 's|\.[1-9]$|.postfix\0|')
   mv man/$i man/$dest
   sed -i "s|^\.so $i|\.so $dest|" man/man?/*.[1-9]
@@ -326,11 +415,20 @@ make non-interactive-package \
        sample_directory=%{postfix_sample_dir} \
        readme_directory=%{postfix_readme_dir} || exit 1
 
+%if 0%{?fedora} < 23 && 0%{?rhel} < 9
+# This installs into the /etc/rc.d/init.d directory
+mkdir -p $RPM_BUILD_ROOT%{_initrddir}
+install -c %{SOURCE1} $RPM_BUILD_ROOT%{_initrddir}/postfix
+%endif
+
 # Systemd
 mkdir -p %{buildroot}%{_unitdir}
 install -m 644 %{SOURCE2} %{buildroot}%{_unitdir}
 install -m 755 %{SOURCE4} %{buildroot}%{postfix_daemon_dir}/aliasesdb
 install -m 755 %{SOURCE5} %{buildroot}%{postfix_daemon_dir}/chroot-update
+
+# systemd-sysusers
+install -p -D -m 0644 %{SOURCE6} %{buildroot}%{_sysusersdir}/postfix.conf
 
 install -c auxiliary/rmail/rmail $RPM_BUILD_ROOT%{_bindir}/rmail.postfix
 
@@ -338,8 +436,8 @@ for i in active bounce corrupt defer deferred flush incoming private saved maild
     mkdir -p $RPM_BUILD_ROOT%{postfix_queue_dir}/$i
 done
 
-# install performance benchmark tools by hand
-for i in smtp-sink smtp-source ; do
+# install performance benchmark and test tools by hand
+for i in smtp-sink smtp-source posttls-finger ; do
   install -c -m 755 bin/$i $RPM_BUILD_ROOT%{postfix_command_dir}/
   install -c -m 755 man/man1/$i.1 $RPM_BUILD_ROOT%{_mandir}/man1/
 done
@@ -377,7 +475,7 @@ find $RPM_BUILD_ROOT%{postfix_doc_dir} -type d | xargs chmod 755
 %if %{with pflogsumm}
 install -c -m 644 pflogsumm-%{pflogsumm_ver}/pflogsumm-faq.txt $RPM_BUILD_ROOT%{postfix_doc_dir}/pflogsumm-faq.txt
 install -c -m 644 pflogsumm-%{pflogsumm_ver}/pflogsumm.1 $RPM_BUILD_ROOT%{_mandir}/man1/pflogsumm.1
-install -c pflogsumm-%{pflogsumm_ver}/pflogsumm.pl $RPM_BUILD_ROOT%{postfix_command_dir}/pflogsumm
+install -c pflogsumm-%{pflogsumm_ver}/pflogsumm $RPM_BUILD_ROOT%{postfix_command_dir}/pflogsumm
 %endif
 
 # install qshape
@@ -390,9 +488,7 @@ rm -f $RPM_BUILD_ROOT%{postfix_config_dir}/aliases
 
 # create /usr/lib/sendmail
 mkdir -p $RPM_BUILD_ROOT%{_prefix}/lib
-pushd $RPM_BUILD_ROOT%{_prefix}/lib
-ln -sf ../sbin/sendmail.postfix .
-popd
+ln -sf --relative $RPM_BUILD_ROOT%{_sbindir}/sendmail.postfix $RPM_BUILD_ROOT%{_prefix}/lib/
 
 mkdir -p $RPM_BUILD_ROOT%{_var}/lib/misc
 touch $RPM_BUILD_ROOT%{_var}/lib/misc/postfix.aliasesdb-stamp
@@ -400,7 +496,7 @@ touch $RPM_BUILD_ROOT%{_var}/lib/misc/postfix.aliasesdb-stamp
 # prepare alternatives ghosts
 for i in %{postfix_command_dir}/sendmail %{_bindir}/{mailq,newaliases,rmail} \
 	%{_sysconfdir}/pam.d/smtp %{_prefix}/lib/sendmail \
-	%{_mandir}/{man1/{mailq.1,newaliases.1},man5/aliases.5,man8/{sendmail.8,smtpd.8}}
+	%{_mandir}/{man1/{mailq.1,newaliases.1},man5/aliases.5,man8/{sendmail.8,smtp{,d}.8}}
 do
 	touch $RPM_BUILD_ROOT$i
 done
@@ -416,7 +512,7 @@ function split_file
 # split global dynamic maps configuration to individual sub-packages
 pushd $RPM_BUILD_ROOT%{postfix_config_dir}
 for map in %{?with_mysql:mysql} %{?with_pgsql:pgsql} %{?with_sqlite:sqlite} \
-%{?with_cdb:cdb} %{?with_ldap:ldap} %{?with_pcre:pcre}; do
+%{?with_cdb:cdb} %{?with_ldap:ldap} %{?with_lmdb:lmdb} %{?with_pcre:pcre}; do
   rm -f dynamicmaps.cf.d/"$map" "postfix-files.d/$map"
   split_file "^\s*$map\b" "$map" dynamicmaps.cf
   sed -i "s|postfix-$map\\.so|%{postfix_shlib_dir}/\\0|" "dynamicmaps.cf.d/$map"
@@ -441,20 +537,26 @@ popd
 	readme_directory=%{postfix_readme_dir} &> /dev/null
 
 ALTERNATIVES_DOCS=""
-[ "%%{_excludedocs}" = 1 ] || ALTERNATIVES_DOCS='--slave %{_mandir}/man1/mailq.1.gz mta-mailqman %{_mandir}/man1/mailq.postfix.1.gz
-	--slave %{_mandir}/man1/newaliases.1.gz mta-newaliasesman %{_mandir}/man1/newaliases.postfix.1.gz
-	--slave %{_mandir}/man8/sendmail.8.gz mta-sendmailman %{_mandir}/man1/sendmail.postfix.1.gz
-	--slave %{_mandir}/man5/aliases.5.gz mta-aliasesman %{_mandir}/man5/aliases.postfix.5.gz
-	--slave %{_mandir}/man8/smtpd.8.gz mta-smtpdman %{_mandir}/man8/smtpd.postfix.8.gz'
+[ "%%{_excludedocs}" = 1 ] || ALTERNATIVES_DOCS='--follower %{_mandir}/man1/mailq.1.gz mta-mailqman %{_mandir}/man1/mailq.postfix.1.gz
+	--follower %{_mandir}/man1/newaliases.1.gz mta-newaliasesman %{_mandir}/man1/newaliases.postfix.1.gz
+	--follower %{_mandir}/man8/sendmail.8.gz mta-sendmailman %{_mandir}/man1/sendmail.postfix.1.gz
+	--follower %{_mandir}/man5/aliases.5.gz mta-aliasesman %{_mandir}/man5/aliases.postfix.5.gz
+	--follower %{_mandir}/man8/smtp.8.gz mta-smtpman %{_mandir}/man8/smtp.postfix.8.gz
+	--follower %{_mandir}/man8/smtpd.8.gz mta-smtpdman %{_mandir}/man8/smtpd.postfix.8.gz'
 
-%{_sbindir}/alternatives --install %{postfix_command_dir}/sendmail mta %{postfix_command_dir}/sendmail.postfix 60 \
-	--slave %{_bindir}/mailq mta-mailq %{_bindir}/mailq.postfix \
-	--slave %{_bindir}/newaliases mta-newaliases %{_bindir}/newaliases.postfix \
-	--slave %{_sysconfdir}/pam.d/smtp mta-pam %{_sysconfdir}/pam.d/smtp.postfix \
-	--slave %{_bindir}/rmail mta-rmail %{_bindir}/rmail.postfix \
-	--slave %{_prefix}/lib/sendmail mta-sendmail %{_prefix}/lib/sendmail.postfix \
+alternatives --install %{postfix_command_dir}/sendmail mta %{postfix_command_dir}/sendmail.postfix 60 \
+	--follower %{_bindir}/mailq mta-mailq %{_bindir}/mailq.postfix \
+	--follower %{_bindir}/newaliases mta-newaliases %{_bindir}/newaliases.postfix \
+	--follower %{_sysconfdir}/pam.d/smtp mta-pam %{_sysconfdir}/pam.d/smtp.postfix \
+	--follower %{_bindir}/rmail mta-rmail %{_bindir}/rmail.postfix \
+	--follower %{_prefix}/lib/sendmail mta-sendmail %{_prefix}/lib/sendmail.postfix \
 	$ALTERNATIVES_DOCS \
 	--initscript postfix
+
+# Make sure that /usr/sbin/sendmail is not missing, if /usr/sbin is a
+# directory. The symlink will only be created if there is no symlink
+# or file already.
+test -h /usr/sbin || ln -s ../bin/sendmail /usr/sbin/sendmail 2>/dev/null || :
 
 %if %{with sasl}
 # Move sasl config to new location
@@ -467,7 +569,7 @@ fi
 # Create self-signed SSL certificate
 if [ ! -f %{sslkey} ]; then
   umask 077
-  %{_bindir}/openssl genrsa 4096 > %{sslkey} 2> /dev/null
+  %{_bindir}/openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out %{sslkey} 2>/dev/null || echo "openssl genpkey failed"
 fi
 
 if [ ! -f %{sslcert} ]; then
@@ -476,8 +578,10 @@ if [ ! -f %{sslcert} ]; then
     FQDN=localhost.localdomain
   fi
 
-  %{_bindir}/openssl req -new -key %{sslkey} -x509 -sha256 -days 365 -set_serial $RANDOM -out %{sslcert} \
-    -subj "/C=--/ST=SomeState/L=SomeCity/O=SomeOrganization/OU=SomeOrganizationalUnit/CN=${FQDN}/emailAddress=root@${FQDN}"
+  req_cmd="%{_bindir}/openssl req -new -key %{sslkey} -x509 -sha256 -days 365 -set_serial $RANDOM -out %{sslcert} \
+    -subj /C=--/ST=SomeState/L=SomeCity/O=SomeOrganization/OU=SomeOrganizationalUnit/CN=${FQDN}/emailAddress=root@${FQDN}"
+# openssl-3.0 and fallback for backward compatibility with openssl < 3.0
+  $req_cmd -noenc -copy_extensions none 2>/dev/null || $req_cmd 2>/dev/null || echo "openssl req failed"
   chmod 644 %{sslcert}
 fi
 
@@ -485,15 +589,12 @@ exit 0
 
 %pre
 # Add user and groups if necessary
-%{_sbindir}/groupadd -g %{maildrop_gid} -r %{maildrop_group} 2>/dev/null
-%{_sbindir}/groupadd -g %{postfix_gid} -r %{postfix_group} 2>/dev/null
-%{_sbindir}/groupadd -g 12 -r mail 2>/dev/null
-%{_sbindir}/useradd -d %{postfix_queue_dir} -s /sbin/nologin -g %{postfix_group} -G mail -M -r -u %{postfix_uid} %{postfix_user} 2>/dev/null
+%sysusers_create_compat %{SOURCE6}
 
-# hack, to turn man8/smtpd.8.gz into alternatives symlink (part of the rhbz#1051180 fix)
-# this could be probably dropped in f23+
-if [ -e %{_mandir}/man8/smtpd.8.gz ]; then
-	[ -h %{_mandir}/man8/smtpd.8.gz ] || rm -f %{_mandir}/man8/smtpd.8.gz
+# hack, to turn man8/smtp.8.gz into alternatives symlink (part of the rhbz#2274402 fix)
+# this could be probably dropped in f44+
+if [ -e %{_mandir}/man8/smtp.8.gz ]; then
+	[ -h %{_mandir}/man8/smtp.8.gz ] || rm -f %{_mandir}/man8/smtp.8.gz
 fi
 
 exit 0
@@ -502,12 +603,29 @@ exit 0
 %systemd_preun %{name}.service
 
 if [ "$1" = 0 ]; then
-    %{_sbindir}/alternatives --remove mta %{postfix_command_dir}/sendmail.postfix
+    alternatives --remove mta %{postfix_command_dir}/sendmail.postfix
 fi
 exit 0
 
 %postun
 %systemd_postun_with_restart %{name}.service
+
+%if 0%{?fedora} < 23 && 0%{?rhel} < 9
+%post sysvinit
+/sbin/chkconfig --add postfix >/dev/null 2>&1 ||:
+
+%preun sysvinit
+if [ "$1" = 0 ]; then
+    %{_initrddir}/postfix stop >/dev/null 2>&1 ||:
+    /sbin/chkconfig --del postfix >/dev/null 2>&1 ||:
+fi
+
+%postun sysvinit
+[ "$1" -ge 1 ] && %{_initrddir}/postfix condrestart >/dev/null 2>&1 ||:
+
+%triggerpostun -n postfix-sysvinit -- postfix < %{sysv2systemdnvr}
+/sbin/chkconfig --add postfix >/dev/null 2>&1 || :
+%endif
 
 %triggerun -- postfix < %{sysv2systemdnvr}
 %{_bindir}/systemd-sysv-convert --save postfix >/dev/null 2>&1 ||:
@@ -551,6 +669,8 @@ exit 0
 %exclude %{postfix_doc_dir}/README_FILES/CDB_README
 %exclude %{_mandir}/man5/ldap_table.5*
 %exclude %{postfix_doc_dir}/README_FILES/LDAP_README
+%exclude %{_mandir}/man5/lmdb_table.5*
+%exclude %{postfix_doc_dir}/README_FILES/LMDB_README
 %exclude %{_mandir}/man5/pcre_table.5*
 %exclude %{postfix_doc_dir}/README_FILES/PCRE_README
 
@@ -586,11 +706,12 @@ exit 0
 %attr(0644, root, root) %{_mandir}/man5/*.postfix.5*
 %attr(0644, root, root) %{_mandir}/man8/[a-qt-v]*.8*
 %attr(0644, root, root) %{_mandir}/man8/s[ch-lnp]*.8*
-%attr(0644, root, root) %{_mandir}/man8/smtp.8*
+%attr(0644, root, root) %{_mandir}/man8/smtp.postfix.8*
 %attr(0644, root, root) %{_mandir}/man8/smtpd.postfix.8*
 
 %attr(0755, root, root) %{postfix_command_dir}/smtp-sink
 %attr(0755, root, root) %{postfix_command_dir}/smtp-source
+%attr(0755, root, root) %{postfix_command_dir}/posttls-finger
 
 %attr(0755, root, root) %{postfix_command_dir}/postalias
 %attr(0755, root, root) %{postfix_command_dir}/postcat
@@ -599,7 +720,7 @@ exit 0
 %attr(0755, root, root) %{postfix_command_dir}/postfix
 %attr(0755, root, root) %{postfix_command_dir}/postkick
 %attr(0755, root, root) %{postfix_command_dir}/postlock
-%attr(0755, root, root) %{postfix_command_dir}/postlog
+%attr(2755, root, %{maildrop_group}) %{postfix_command_dir}/postlog
 %attr(0755, root, root) %{postfix_command_dir}/postmap
 %attr(0755, root, root) %{postfix_command_dir}/postmulti
 %attr(2755, root, %{maildrop_group}) %{postfix_command_dir}/postqueue
@@ -622,11 +743,13 @@ exit 0
 %attr(0755, root, root) %{postfix_daemon_dir}/pipe
 %attr(0755, root, root) %{postfix_daemon_dir}/post-install
 %attr(0644, root, root) %{postfix_config_dir}/postfix-files
+%attr(0755, root, root) %{postfix_daemon_dir}/postfix-non-bdb-script
 %attr(0755, root, root) %{postfix_daemon_dir}/postfix-script
 %attr(0755, root, root) %{postfix_daemon_dir}/postfix-tls-script
 %attr(0755, root, root) %{postfix_daemon_dir}/postfix-wrapper
 %attr(0755, root, root) %{postfix_daemon_dir}/postmulti-script
 %attr(0755, root, root) %{postfix_daemon_dir}/postscreen
+%attr(0755, root, root) %{postfix_daemon_dir}/postlogd
 %attr(0755, root, root) %{postfix_daemon_dir}/proxymap
 %attr(0755, root, root) %{postfix_shlib_dir}/libpostfix-*.so
 %{_bindir}/mailq.postfix
@@ -641,6 +764,7 @@ exit 0
 %ghost %{_mandir}/man1/newaliases.1.gz
 %ghost %{_mandir}/man5/aliases.5.gz
 %ghost %{_mandir}/man8/sendmail.8.gz
+%ghost %{_mandir}/man8/smtp.8.gz
 %ghost %{_mandir}/man8/smtpd.8.gz
 
 %ghost %attr(0755, root, root) %{_bindir}/mailq
@@ -650,6 +774,14 @@ exit 0
 %ghost %attr(0755, root, root) %{_prefix}/lib/sendmail
 
 %ghost %attr(0644, root, root) %{_var}/lib/misc/postfix.aliasesdb-stamp
+
+# systemd-sysusers
+%{_sysusersdir}/postfix.conf
+
+%if 0%{?fedora} < 23 && 0%{?rhel} < 9
+%files sysvinit
+%{_initrddir}/postfix
+%endif
 
 %files perl-scripts
 %attr(0755, root, root) %{postfix_command_dir}/qshape
@@ -705,6 +837,15 @@ exit 0
 %attr(0644, root, root) %{postfix_doc_dir}/README_FILES/LDAP_README
 %endif
 
+%if %{with lmdb}
+%files lmdb
+%attr(0644, root, root) %{postfix_config_dir}/dynamicmaps.cf.d/lmdb
+%attr(0644, root, root) %{postfix_config_dir}/postfix-files.d/lmdb
+%attr(0755, root, root) %{postfix_shlib_dir}/postfix-lmdb.so
+%attr(0644, root, root) %{_mandir}/man5/lmdb_table.5*
+%attr(0644, root, root) %{postfix_doc_dir}/README_FILES/LMDB_README
+%endif
+
 %if %{with pcre}
 %files pcre
 %attr(0644, root, root) %{postfix_config_dir}/dynamicmaps.cf.d/pcre
@@ -715,21 +856,444 @@ exit 0
 %endif
 
 %changelog
-* Tue Dec  4 2018 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.3.1-8
+* Mon Apr 13 2026 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.11.1-2
+- Fixed default TLS config to work with the removed ca-bundle.crt
+  Resolves: rhbz#2447292
+
+* Mon Apr 13 2026 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.11.1-1
+- New version
+  Resolves: rhbz#2446390
+
+* Tue Mar 10 2026 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.11.0-1
+- New version
+  Resolves: rhbz#2444870
+
+* Thu Feb 19 2026 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.10.8-1
+- New version
+  Resolves: rhbz#2440818
+
+* Mon Jan 26 2026 Fedor Vorobev <fvorobev@redhat.com> - 2:3.10.7-3
+- Added a RHEL-specific patch to remove an OpenSSL version mismatch warning.
+  Resolves: RHEL-128018
+
+* Sat Jan 17 2026 Fedora Release Engineering <releng@fedoraproject.org> - 2:3.10.7-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_44_Mass_Rebuild
+
+* Fri Jan 02 2026 Jaroslav Škarvada  <jskarvad@redhat.com> - 2:3.10.7-1
+- New version
+  Resolves: rhbz#2417154
+
+* Thu Oct 30 2025 Jaroslav Škarvada  <jskarvad@redhat.com> - 2:3.10.5-1
+- New version
+  Resolves: rhbz#2406450
+- Changed protocol for downloading sources from FTP to HTTP (HTTPS isn't supported)
+
+* Mon Aug 25 2025 Jaroslav Škarvada  <jskarvad@redhat.com> - 2:3.10.4-1
+- New version
+  Resolves: rhbz#2389310
+
+* Wed Aug 06 2025 František Zatloukal <fzatlouk@redhat.com> - 2:3.10.3-3
+- Rebuilt for icu 77.1
+
+* Fri Jul 25 2025 Fedora Release Engineering <releng@fedoraproject.org> - 2:3.10.3-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_43_Mass_Rebuild
+
+* Thu Jul 10 2025 Jaroslav Škarvada  <jskarvad@redhat.com> - 2:3.10.3-1
+- New version
+  Resolves: rhbz#2379297
+- Updated cyrus-imapd comment in config to point to the correct location
+  Related: RHEL-63089
+
+* Thu Jun  5 2025 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.10.2-3
+- Updated pflogsumm to 1.1.6
+  Resolves: rhbz#2368396
+
+* Thu May 08 2025 Zbigniew Jędrzejewski-Szmek <zbyszek@in.waw.pl> - 2:3.10.2-2
+- Make sure the /usr/sbin/sendmail symlink is created on unmerged systems
+  Resolves: rhbz#2360491
+
+* Thu Apr 24 2025 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.10.2-1
+- New version
+  Resolves: rhbz#2361704
+
+* Thu Mar  6 2025 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.10.1-1
+- New version
+  Resolves: rhbz#2346039
+
+* Sat Jan 18 2025 Fedora Release Engineering <releng@fedoraproject.org> - 2:3.9.1-4
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_42_Mass_Rebuild
+
+* Sun Jan 12 2025 Zbigniew Jędrzejewski-Szmek <zbyszek@in.waw.pl> - 2:3.9.1-3
+- Rebuilt for the bin-sbin merge (2nd attempt)
+
+* Sun Dec 08 2024 Pete Walter <pwalter@fedoraproject.org> - 2:3.9.1-2
+- Rebuild for ICU 76
+
+* Thu Dec  5 2024 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.9.1-1
+- New version
+  Resolves: rhbz#2330454
+
+* Thu Jul 25 2024 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.9.0-8
+- Fixed postlog RPM verification
+
+* Thu Jul 25 2024 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.9.0-7
+- Explicitly set default_database_type if lmdb map is used
+
+* Fri Jul 19 2024 Fedora Release Engineering <releng@fedoraproject.org> - 2:3.9.0-6
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_41_Mass_Rebuild
+
+* Tue Jul 09 2024 Zbigniew Jędrzejewski-Szmek <zbyszek@in.waw.pl> - 2:3.9.0-5
+- Rebuilt for the bin-sbin merge
+
+* Fri Apr 12 2024 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.9.0-4
+- Fixed closing quote in alternatives
+  Related: rhbz#2274402
+
+* Thu Apr 11 2024 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.9.0-3
+- Fixed typo in alternatives
+  Related: rhbz#2274402
+
+* Thu Apr 11 2024 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.9.0-2
+- Added man8/smtp.8.gz to alternatives
+  Resolves: rhbz#2274402
+
+* Thu Mar  7 2024 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.9.0-1
+- New version
+  Resolves: rhbz#2268245
+
+* Tue Mar  5 2024 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.8.6-1
+- New version
+  Resolves: rhbz#2267836
+
+* Tue Feb 27 2024 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.8.5-4
+- Dropped mail group configuration / creation, it is provided by setup
+  Resolves: rhbz#2244744
+
+* Thu Feb 01 2024 Pete Walter <pwalter@fedoraproject.org> - 2:3.8.5-3
+- Rebuild for ICU 74
+
+* Thu Jan 25 2024 Fedora Release Engineering <releng@fedoraproject.org> - 2:3.8.5-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_40_Mass_Rebuild
+
+* Mon Jan 22 2024 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.8.5-1
+- New version
+  Resolves: rhbz#2259469
+
+* Sun Jan 21 2024 Fedora Release Engineering <releng@fedoraproject.org> - 2:3.8.4-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_40_Mass_Rebuild
+
+* Tue Jan  2 2024 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.8.4-1
+- New version
+  Resolves: rhbz#2255641
+- Fixed SMTP smuggling vulnerability
+  Resolves: CVE-2023-51764
+
+* Tue Dec 12 2023 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.8.3-2
+- Converted license tag to SPDX
+
+* Thu Nov  2 2023 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.8.3-1
+- New version
+  Resolves: rhbz#2247553
+
+* Mon Oct  9 2023 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.8.2-2
+- Drop libdb for RHEL>9
+  Related: rhbz#1788480
+
+* Tue Sep  5 2023 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.8.2-1
+- New version
+  Resolves: rhbz#2236828
+
+* Mon Aug 14 2023 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.8.1-5
+- Use systemd-sysusers, original patch by
+  Jonathan Wright <jonathan@almalinux.org>
+
+* Fri Jul 21 2023 Fedora Release Engineering <releng@fedoraproject.org> - 2:3.8.1-4
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_39_Mass_Rebuild
+
+* Tue Jul 11 2023 František Zatloukal <fzatlouk@redhat.com> - 2:3.8.1-3
+- Rebuilt for ICU 73.2
+
+* Tue Jul 11 2023 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.8.1-2
+- Fixed possible warning when postfix is restarted
+  Resolves: rhbz#2218058
+
+* Tue Jun  6 2023 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.8.1-1
+- New version
+  Resolves: rhbz#2212596
+
+* Thu May 25 2023 Tomas Korbar <tkorbar@redhat.com> - 2:3.8.0-3
+- Fix freed memory access
+
+* Wed Apr 26 2023 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.8.0-2
+- Dropped whitespace-name-fix patch, not needed
+
+* Wed Apr 26 2023 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.8.0-1
+- New version
+  Resolves: rhbz#2187121
+
+* Wed Jan 25 2023 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.7.4-1
+- New version
+  Resolves: rhbz#2162932
+
+* Fri Jan 20 2023 Fedora Release Engineering <releng@fedoraproject.org> - 2:3.7.3-4
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_38_Mass_Rebuild
+
+* Sat Dec 31 2022 Mamoru TASAKA <mtasaka@fedoraproject.org> - 2:3.7.3-3
+- Backport upstream fix for uname -r detection with kernel 6.x
+
+* Sat Dec 31 2022 Pete Walter <pwalter@fedoraproject.org> - 2:3.7.3-2
+- Rebuild for ICU 72
+
+* Mon Oct 10 2022 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.7.3-1
+- New version
+  Resolves: rhbz#2133120
+
+* Mon Aug 01 2022 Frantisek Zatloukal <fzatlouk@redhat.com> - 2:3.7.2-4
+- Rebuilt for ICU 71.1
+
+* Sat Jul 23 2022 Stewart Smith <trawets@amazon.com> - 2:3.7.2-3
+- Build with pcre2 instead of the deprecated pcre library
+
+* Fri Jul 22 2022 Fedora Release Engineering <releng@fedoraproject.org> - 2:3.7.2-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_37_Mass_Rebuild
+
+* Thu Apr 28 2022 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.7.2-1
+- New version
+  Resolves: rhbz#2079634
+
+* Tue Apr 19 2022 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.7.1-1
+- New version
+  Resolves: rhbz#2076317
+
+* Tue Feb 22 2022 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.7.0-1
+- New version
+  Resolves: rhbz#2051046
+
+* Thu Jan 20 2022 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.6.4-1
+- New version
+  Resolves: rhbz#2040977
+- Suppressed openssl output during SSL certificates generation
+  Resolves: rhbz#2041589
+
+* Mon Jan 17 2022 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.6.3-5
+- Fixed pflogsumm to allow underscores in the syslog_name
+  Resolves: rhbz#1931403
+
+* Tue Dec 14 2021 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.6.3-4
+- Added SELinux workound for systemd service to work after 'postfix start'
+
+* Wed Dec 08 2021 Timm Bäder <tbaeder@redhat.com> - 2:3.6.3-3
+- Use %%set_build_flags to set all build flags
+
+* Fri Nov 12 2021 Björn Esser <besser82@fedoraproject.org> - 2:3.6.3-2
+- Rebuild(libnsl2)
+
+* Wed Nov 10 2021 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.6.3-1
+- New version
+  Resolves: rhbz#2020984
+
+* Tue Sep 14 2021 Sahana Prasad <sahana@redhat.com> - 2:3.6.2-6
+- Rebuilt with OpenSSL 3.0.0
+
+* Thu Aug  5 2021 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.6.2-5
+- Fixed cleanup crash when processing messages with whitespace only fullname
+- Fixed whitespaces in the glibc-234-build-fix patch
+
+* Thu Aug  5 2021 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.6.2-4
+- Updated patch fixing FTBFS with the glibc-2.34
+
+* Tue Aug  3 2021 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.6.2-3
+- Fixed openssl req parameters
+
+* Mon Aug  2 2021 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.6.2-2
+- Fixed scriptlets to work with openssl-3.0
+
+* Thu Jul 29 2021 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.6.2-1
+- New version
+  Resolves: rhbz#1985778
+
+* Fri Jul 23 2021 Fedora Release Engineering <releng@fedoraproject.org> - 2:3.6.1-3
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_35_Mass_Rebuild
+
+* Fri Jul  2 2021 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.6.1-2
+- Fixed build on rhel < 9
+
+* Mon Jun 14 2021 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.6.1-1
+- New version
+  Resolves: rhbz#1971363
+
+* Thu May 20 2021 Pete Walter <pwalter@fedoraproject.org> - 2:3.6.0-3
+- Rebuild for ICU 69
+
+* Wed May 19 2021 Pete Walter <pwalter@fedoraproject.org> - 2:3.6.0-2
+- Rebuild for ICU 69
+
+* Fri Apr 30 2021 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.6.0-1
+- New version
+  Resolves: rhbz#1955369
+
+* Thu Apr 22 2021 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.10-2
+- Fixed NIS build requirements
+
+* Mon Apr 12 2021 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.10-1
+- New version
+  Resolves: rhbz#1948306
+
+* Thu Mar 25 2021 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.9-7
+- Simplified macros related to NIS
+
+* Wed Mar 24 2021 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.9-6
+- Disable NIS support for RHEL9+ (patch from fjanus@redhat.com)
+
+* Tue Mar 02 2021 Zbigniew Jędrzejewski-Szmek <zbyszek@in.waw.pl> - 2:3.5.9-5
+- Rebuilt for updated systemd-rpm-macros
+  See https://pagure.io/fesco/issue/2583.
+
+* Fri Feb 19 2021 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.9-4
+- Fixed sysvinit conditionals for RHEL
+  Resolves: rhbz#1930709
+
+* Mon Feb 08 2021 Pavel Raiskup <praiskup@redhat.com> - 2:3.5.9-3
+- rebuild for libpq ABI fix rhbz#1908268
+
+* Wed Jan 27 2021 Fedora Release Engineering <releng@fedoraproject.org> - 2:3.5.9-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_34_Mass_Rebuild
+
+* Mon Jan 18 2021 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.9-1
+- New version
+  Resolves: rhbz#1917155
+
+* Mon Nov  9 2020 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.8-1
+- New version
+  Resolves: rhbz#1895644
+
+* Mon Aug 31 2020 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.7-1
+- New version
+  Resolves: rhbz#1873857
+
+* Thu Aug  6 2020 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.6-2
+- Minor spec cleanup
+- Added posttls-finger test tool
+  Resolves: rhbz#1865701
+
+* Tue Jul 28 2020 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.6-1
+- New version
+  Resolves: rhbz#1860547
+
+* Tue Jul 14 2020 Tom Stellard <tstellar@redhat.com> - 2:3.5.4-3
+- Use make macros
+- https://fedoraproject.org/wiki/Changes/UseMakeBuildInstallMacro
+
+* Wed Jul  8 2020 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.4-2
+- Added support for LMDB maps
+
+* Mon Jun 29 2020 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.4-1
+- New version
+  Resolves: rhbz#1851650
+
+* Mon Jun 15 2020 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.3-1
+- New version
+  Resolves: rhbz#1846939
+
+* Tue May 19 2020 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.2-1
+- New version
+  Resolves: rhbz#1836653
+
+* Fri May 15 2020 Pete Walter <pwalter@fedoraproject.org> - 2:3.5.1-2
+- Rebuild for ICU 67
+
+* Mon Apr 20 2020 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.1-1
+- New version
+  Resolves: rhbz#1825547
+
+* Mon Mar 16 2020 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.0-1
+- New version
+  Resolves: rhbz#1813740
+
+* Thu Mar 12 2020 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.4.10-1
+- New version
+  Resolves: rhbz#1812987
+
+* Mon Feb  3 2020 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.4.9-1
+- New version
+  Resolves: rhbz#1797383
+- Dropped ref-search patch (upstreamed)
+- Built with -fcommon to overcome FTBFS with gcc-10, problem reported upstream
+
+* Thu Jan 30 2020 Fedora Release Engineering <releng@fedoraproject.org> - 2:3.4.8-3
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_32_Mass_Rebuild
+
+* Mon Dec 16 2019 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.4.8-2
+- Fixed DNS resolver to use ref_search instead of ref_query
+  Resolves: rhbz#1723950
+
+* Mon Nov 25 2019 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.4.8-1
+- New version
+  Resolves: rhbz#1776033
+
+* Fri Nov 01 2019 Pete Walter <pwalter@fedoraproject.org> - 2:3.4.7-3
+- Rebuild for ICU 65
+
+* Wed Sep 25 2019 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.4.7-2
+- Added hostname as explicit requirement for the post scriptlet
+
+* Mon Sep 23 2019 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.4.7-1
+- New version
+  Resolves: rhbz#1754198
+
+* Fri Jul 26 2019 Fedora Release Engineering <releng@fedoraproject.org> - 2:3.4.6-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_31_Mass_Rebuild
+
+* Mon Jul  8 2019 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.4.6-1
+- New version
+  Resolves: rhbz#1726462
+
+* Fri May  3 2019 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.4.4-4
+- Fixed FTBFS with new glibc due to dropped RES macros
+
+* Fri May  3 2019 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.4.4-3
+- Added findutils as explicit requirement
+  Resolves: rhbz#1629057
+
+* Tue Mar 26 2019 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.4.4-2
+- Fixed example chroot-update script
+  Resolves: rhbz#1398910
+
+* Fri Mar 15 2019 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.4.4-1
+- New version
+  Resolves: rhbz#1689029
+
+* Mon Mar 11 2019 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.4.3-1
+- New version
+  Resolves: rhbz#1687208
+
+* Fri Mar  8 2019 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.4.1-1
+- New version
+  Resolves: rhbz#1686673
+
+* Fri Mar  1 2019 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.4.0-1
+- New version
+  Resolves: rhbz#1683855
+
+* Wed Feb 27 2019 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.3.3-1
+- New version
+  Resolves: rhbz#1683487
+
+* Sat Feb 02 2019 Fedora Release Engineering <releng@fedoraproject.org> - 2:3.3.1-9
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_30_Mass_Rebuild
+
+* Wed Jan 23 2019 Pete Walter <pwalter@fedoraproject.org> - 2:3.3.1-8
+- Rebuild for ICU 63
+
+* Mon Dec  3 2018 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.3.1-7
 - Fixed posttls-finger to work with unix domains
-  Resolves: rhbz#1602663
 
-* Wed Nov 28 2018 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.3.1-7
-- Added m4 to BuildRequires
-  Resolves: rhbz#1619187
-
-* Tue Nov 20 2018 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.3.1-6
+* Mon Nov 19 2018 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.3.1-6
 - Used _prefix macro for /usr and _includedir macro for /usr/include
-  Resolves: rhbz#1645239
 
-* Thu Nov  1 2018 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.3.1-5
-- Dropped sysv support from the spec
-  Resolves: rhbz#1636961
+* Mon Aug 20 2018 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.3.1-5
+- Added m4 to BuildRequires
+  Resolves: rhbz#1619111
 
 * Tue Jul 24 2018 Robert Scheck <robert@fedoraproject.org> - 2:3.3.1-4
 - Add basic postfix TLS configuration by default (#1608050)
@@ -1336,7 +1900,7 @@ exit 0
 
 * Fri Mar 11 2005 Thomas Woerner <twoerner@redhat.com> 2:2.2.0-1
 - new version 2.2.0
-- cleanup of spec file: removed external TLS and IPV6 patches, removed 
+- cleanup of spec file: removed external TLS and IPV6 patches, removed
   smtp_sasl_proto patch
 - dropped samples directory till there are good examples again (was TLS and
   IPV6)
@@ -1429,10 +1993,10 @@ exit 0
   for RHEL3, we'll branch and set set sasl to v1 and turn off ipv6
 
 * Tue Feb 17 2004 John Dennis <jdennis@porkchop.devel.redhat.com>
-- revert back to v1 of sasl because LDAP still links against v1 and we can't 
+- revert back to v1 of sasl because LDAP still links against v1 and we can't
 - bump revision for build
   have two different versions of the sasl library loaded in one load image at
-  the same time. How is that possible? Because the sasl libraries have different 
+  the same time. How is that possible? Because the sasl libraries have different
   names (libsasl.so & libsasl2.so) but export the same symbols :-(
   Fixes bugs 115249 and 111767
 
@@ -1461,7 +2025,7 @@ exit 0
 
 * Sat Dec 13 2003 Jeff Johnson <jbj@jbj.org> 2:2.0.16-2
 - rebuild against db-4.2.52.
- 
+
 * Mon Nov 17 2003 John Dennis <jdennis@finch.boston.redhat.com> 2:2.0.16-1
 - sync up with current upstream release, 2.0.16, fixes bug #108960
 

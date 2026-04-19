@@ -1,8 +1,8 @@
 diff --git a/conf/main.cf b/conf/main.cf
-index 7af8bde..fbe5c62 100644
+index f61060e..fb218b8 100644
 --- a/conf/main.cf
 +++ b/conf/main.cf
-@@ -132,6 +132,10 @@ mail_owner = postfix
+@@ -136,6 +136,10 @@ mail_owner = postfix
  #inet_interfaces = all
  #inet_interfaces = $myhostname
  #inet_interfaces = $myhostname, localhost
@@ -13,7 +13,7 @@ index 7af8bde..fbe5c62 100644
  
  # The proxy_interfaces parameter specifies the network interface
  # addresses that this mail system receives mail on by way of a
-@@ -176,7 +180,7 @@ mail_owner = postfix
+@@ -180,7 +184,7 @@ mail_owner = postfix
  #
  # See also below, section "REJECTING MAIL FOR UNKNOWN LOCAL USERS".
  #
@@ -22,7 +22,7 @@ index 7af8bde..fbe5c62 100644
  #mydestination = $myhostname, localhost.$mydomain, localhost, $mydomain
  #mydestination = $myhostname, localhost.$mydomain, localhost, $mydomain,
  #	mail.$mydomain, www.$mydomain, ftp.$mydomain
-@@ -398,7 +402,7 @@ unknown_local_recipient_reject_code = 550
+@@ -407,7 +411,7 @@ unknown_local_recipient_reject_code = 550
  # "postfix reload" to eliminate the delay.
  #
  #alias_maps = dbm:/etc/aliases
@@ -31,7 +31,7 @@ index 7af8bde..fbe5c62 100644
  #alias_maps = hash:/etc/aliases, nis:mail.aliases
  #alias_maps = netinfo:/aliases
  
-@@ -409,7 +413,7 @@ unknown_local_recipient_reject_code = 550
+@@ -418,7 +422,7 @@ unknown_local_recipient_reject_code = 550
  #
  #alias_database = dbm:/etc/aliases
  #alias_database = dbm:/etc/mail/aliases
@@ -40,11 +40,13 @@ index 7af8bde..fbe5c62 100644
  #alias_database = hash:/etc/aliases, hash:/opt/majordomo/aliases
  
  # ADDRESS EXTENSIONS (e.g., user+foo)
-@@ -479,7 +483,27 @@ unknown_local_recipient_reject_code = 550
+@@ -487,8 +491,28 @@ unknown_local_recipient_reject_code = 550
+ # non-UNIX accounts with "User unknown in local recipient table".
  #
  # Cyrus IMAP over LMTP. Specify ``lmtpunix      cmd="lmtpd"
- # listen="/var/imap/socket/lmtp" prefork=0'' in cyrus.conf.
+-# listen="/var/imap/socket/lmtp" prefork=0'' in cyrus.conf.
 -#mailbox_transport = lmtp:unix:/var/imap/socket/lmtp
++# listen="/var/lib/imap/socket/lmtp" prefork=0'' in cyrus.conf.
 +#mailbox_transport = lmtp:unix:/var/lib/imap/socket/lmtp
 +
 +# If using the cyrus-imapd IMAP server deliver local mail to the IMAP
@@ -69,7 +71,7 @@ index 7af8bde..fbe5c62 100644
  #
  # Cyrus IMAP via command line. Uncomment the "cyrus...pipe" and
  # subsequent line in master.cf.
-@@ -499,8 +523,7 @@ unknown_local_recipient_reject_code = 550
+@@ -508,8 +532,7 @@ unknown_local_recipient_reject_code = 550
  # the main.cf file, otherwise the SMTP server will reject mail for    
  # non-UNIX accounts with "User unknown in local recipient table".
  #
@@ -79,12 +81,11 @@ index 7af8bde..fbe5c62 100644
  #fallback_transport =
  
  # The luser_relay parameter specifies an optional destination address
-@@ -673,4 +696,41 @@ sample_directory =
- # readme_directory: The location of the Postfix README files.
- #
- readme_directory =
+@@ -691,4 +714,34 @@ shlib_directory =
+ # between multiple Postfix instances.
+ meta_directory = /etc/postfix
+ 
 -inet_protocols = ipv4
-+
 +# TLS CONFIGURATION
 +#
 +# Basic Postfix TLS configuration by default with self-signed certificate
@@ -112,26 +113,20 @@ index 7af8bde..fbe5c62 100644
 +#
 +smtp_tls_CApath = /etc/pki/tls/certs
 +
-+# The full pathname of a file containing CA certificates of root CAs
-+# trusted to sign either remote SMTP server certificates or intermediate CA
-+# certificates.
-+#
-+smtp_tls_CAfile = /etc/pki/tls/certs/ca-bundle.crt
-+
 +# Use TLS if this is supported by the remote SMTP server, otherwise use
 +# plaintext (opportunistic TLS outbound).
 +#
 +smtp_tls_security_level = may
 diff --git a/conf/master.cf b/conf/master.cf
-index b67ed59..a9633ba 100644
+index 5abe06c..81ae929 100644
 --- a/conf/master.cf
 +++ b/conf/master.cf
-@@ -96,14 +96,14 @@ scache    unix  -       -       n       -       1       scache
+@@ -116,14 +116,14 @@ postlog   unix-dgram n  -       n       -       1       postlogd
  # Also specify in main.cf: cyrus_destination_recipient_limit=1
  #
  #cyrus     unix  -       n       n       -       -       pipe
--#  user=cyrus argv=/cyrus/bin/deliver -e -r ${sender} -m ${extension} ${user}
-+#  user=cyrus argv=/usr/lib/cyrus-imapd/deliver -e -r ${sender} -m ${extension} ${user}
+-#  flags=DRX user=cyrus argv=/cyrus/bin/deliver -e -r ${sender} -m ${extension} ${user}
++#  flags=DRX user=cyrus argv=/usr/lib/cyrus-imapd/deliver -e -r ${sender} -m ${extension} ${user}
  #
  # ====================================================================
  #

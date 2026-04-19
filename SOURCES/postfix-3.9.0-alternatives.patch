@@ -1,8 +1,8 @@
 diff --git a/conf/post-install b/conf/post-install
-index 904cefa..5f1039b 100644
+index ed7c79a..c647f81 100644
 --- a/conf/post-install
 +++ b/conf/post-install
-@@ -532,6 +532,17 @@ test -n "$create" && {
+@@ -541,6 +541,18 @@ test -n "$create" && {
  	    case $path in
  	    no|no/*) continue;;
  	    esac
@@ -15,6 +15,7 @@ index 904cefa..5f1039b 100644
 +		/usr/share/man/man1/mailq.1.gz) path=/usr/share/man/man1/mailq.postfix.1.gz ;;
 +		/usr/share/man/man1/newaliases.1.gz) path=/usr/share/man/man1/newaliases.postfix.1.gz ;;
 +		/usr/share/man/man5/aliases.5.gz) path=/usr/share/man/man5/aliases.postfix.5.gz ;;
++		/usr/share/man/man8/smtp.8.gz) path=/usr/share/man/man8/smtp.postfix.8.gz ;;
 +		/usr/share/man/man8/smtpd.8.gz) path=/usr/share/man/man8/smtpd.postfix.8.gz ;;
 +	    esac
  	    # Pick up the flags.

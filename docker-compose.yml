@@ -1,14 +1,10 @@
-version: "3.4"
 services:
-  centos7postfixbuild:
+  rocky8build:
     volumes:
-      - rpms:/home/centos/rpmbuild/SRPMS
-      - rpm7:/home/centos/rpmbuild/RPMS
+      - rpm8rocky:/home/centos/rpmbuild/RPMS
     build:
       context: .
 
 volumes:
-  rpms:
-    name: rpms
-  rpm7:
-    name: rpm7
+  rpm8rocky:
+    name: rpm8rocky
