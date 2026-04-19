@@ -120,7 +120,12 @@ BuildRequires: perl-generators
 BuildRequires: pkgconfig
 BuildRequires: zlib-devel
 BuildRequires: systemd-units
+# Upstream requires 4.0, we require 69.1 to ensure use of libicu69
+%if 0%{?rhel}
+BuildRequires: libicu-devel = 69.1
+%else
 BuildRequires: libicu-devel
+%endif
 BuildRequires: gcc
 BuildRequires: m4
 BuildRequires: findutils
