@@ -1,5 +1,7 @@
+ARG repo=ghcr.io/aursu/rpmbuild
 ARG os=8.10.20240528
-FROM aursu/rpmbuild:${os}-build
+ARG image=build
+FROM ${repo}:${os}-${image}
 
 USER root
 RUN dnf -y --enablerepo=bintray-custom install \
